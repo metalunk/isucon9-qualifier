@@ -159,6 +159,8 @@ def mget_user_simple_by_ids(user_ids: dict) -> dict:
         conn = dbh()
         with conn.cursor() as c:
             ids = list(user_ids.keys())
+            if not ids:
+                return {}
             format_strings = ','.join(['%s'] * len(ids))
             c.execute("SELECT * FROM `users` WHERE id IN (%s)" % format_strings, tuple(ids))
             users = c.fetchall()
