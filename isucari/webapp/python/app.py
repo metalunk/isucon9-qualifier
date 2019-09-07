@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import socket
-import io
 import os
 import random
 import string
@@ -12,6 +11,7 @@ import MySQLdb.cursors
 import flask
 import bcrypt
 import pathlib
+import redis
 import requests
 
 base_path = pathlib.Path(__file__).resolve().parent.parent
@@ -47,6 +47,9 @@ class Constants(object):
 
     ITEMS_PER_PAGE = 48
     TRANSACTIONS_PER_PAGE = 10
+
+    REDIS_CATEGORY_KEY = 'c_'
+    REDIS_CATEGORY_PARENT_KEY = 'cp_'
 
 
 class HttpException(Exception):
@@ -148,7 +151,35 @@ def get_user_simple_by_id(user_id):
     return user
 
 
+def convert_to_int(category):
+    category['id'] = int(category['id'])
+    category['parent_id'] = int(category['parent_id'])
+    return category
+
+
+def get_category_cache(category_id):
+    r = get_redis_client()
+    category = r.hgetall(create_category_key(category_id))
+    if category:
+        return convert_to_int(category)
+    else:
+        return None
+
+
+def get_category_parent_cache(root_category_id):
+    r = get_redis_client()
+    category_ids = r.lrange(create_category_parent_key(root_category_id), 0, -1)
+    if category_ids:
+        return list(map(int, category_ids))
+    else:
+        return None
+
+
 def get_category_by_id(category_id):
+    category = get_category_cache(category_id)
+    if category:
+        return category
+
     conn = dbh()
     sql = "SELECT * FROM `categories` WHERE `id` = %s"
     with conn.cursor() as c:
@@ -180,7 +211,7 @@ def to_item_json(item, simple=False):
     if simple:
         keys = ("id", "seller_id", "seller", "status", "name", "price", "image_url", "category_id", "category", "created_at")
 
-    return {k:v for k,v in item.items() if k in keys}
+    return {k: v for k, v in item.items() if k in keys}
 
 
 def ensure_required_payload(keys=None):
@@ -216,7 +247,6 @@ def get_shipment_service_url():
 
 
 def api_shipment_status(shipment_url, params={}):
-
     try:
         res = requests.post(
             shipment_url + "/status",
@@ -234,10 +264,89 @@ def api_shipment_status(shipment_url, params={}):
 def get_image_url(image_name):
     return "/upload/{}".format(image_name)
 
+
+redis_pool = None
+
+
+def create_redis_connection_pool():
+    global redis_pool
+    host = os.getenv('REDIS_HOST', '127.0.0.1')
+    port = os.getenv('REDIS_PORT', 6379)
+    db = os.getenv('REDIS_DB', 0)
+    redis_pool = redis.ConnectionPool(host=host, port=port, db=db, decode_responses=True)
+
+
+def get_redis_client():
+    return redis.Redis(connection_pool=redis_pool, encoding='utf-8', decode_responses=True)
+
+
+def flush_redis():
+    r = get_redis_client()
+    r.flushdb()
+
+
+def create_category_key(category_id):
+    # Like 'c_11'
+    return Constants.REDIS_CATEGORY_KEY + str(category_id)
+
+
+def create_category_parent_key(category_parent_id):
+    # Like 'cp_1'
+    return Constants.REDIS_CATEGORY_PARENT_KEY + str(category_parent_id)
+
+
+def create_category_cache():
+    r = get_redis_client()
+    m = dbh()
+
+    with m.cursor() as c:
+        sql = "SELECT * FROM `categories`"
+        c.execute(sql)
+        categories = c.fetchall()
+
+    parent_category_name = {}
+    for c in categories:
+        if c['parent_id'] == 0:
+            parent_category_name[c['id']] = c['category_name']
+
+    for c in categories:
+        parent_name = ''
+        if c['parent_id'] != 0:
+            parent_name = parent_category_name[c['parent_id']]
+
+        data = {
+            'id': c['id'],
+            'category_name': c['category_name'],
+            'parent_id': c['parent_id'],
+            'parent_category_name': parent_name,
+        }
+        r.hmset(create_category_key(c['id']), data)
+
+
+def create_category_parent_cache():
+    r = get_redis_client()
+    m = dbh()
+
+    with m.cursor() as c:
+        sql = "SELECT * FROM `categories`"
+        c.execute(sql)
+        categories = c.fetchall()
+
+    for c in categories:
+        parent_id = c['parent_id']
+        if parent_id != 0:
+            r.lpush(create_category_parent_key(c['parent_id']), c['id'])
+
+
 # API
 @app.route("/initialize", methods=["POST"])
 def post_initialize():
     conn = dbh()
+    create_redis_connection_pool()
+
+    flush_redis()
+    create_category_cache()
+    create_category_parent_cache()
 
     subprocess.call(["../sql/init.sh"])
 
@@ -265,7 +374,7 @@ def post_initialize():
 
     return flask.jsonify({
         "campaign": 0,  # キャンペーン実施時には還元率の設定を返す。詳しくはマニュアルを参照のこと。
-        "language": "python" # 実装言語を返す
+        "language": "python"  # 実装言語を返す
     })
 
 
@@ -349,6 +458,7 @@ def get_new_items():
 @app.route("/new_items/<root_category_id>.json", methods=["GET"])
 def get_new_category_items(root_category_id=None):
     conn = dbh()
+    r = get_redis_client()
 
     root_category = get_category_by_id(root_category_id)
 
@@ -367,19 +477,22 @@ def get_new_category_items(root_category_id=None):
             http_json_error(requests.codes['bad_request'], "created_at param error")
         created_at = int(created_at_str)
 
-    category_ids = []
     with conn.cursor() as c:
         try:
-            sql = "SELECT id FROM `categories` WHERE parent_id=%s"
-            c.execute(sql, (
-                root_category_id,
-            ))
+            category_ids = get_category_parent_cache(root_category_id)
 
-            while True:
-                category = c.fetchone()
-                if category is None:
-                    break
-                category_ids.append(category["id"])
+            if not category_ids:
+                category_ids = []
+                sql = "SELECT id FROM `categories` WHERE parent_id=%s"
+                c.execute(sql, (
+                    root_category_id,
+                ))
+
+                while True:
+                    category = c.fetchone()
+                    if category is None:
+                        break
+                    category_ids.append(category["id"])
 
             if item_id > 0 and created_at > 0:
                 sql = "SELECT * FROM `items` WHERE `status` IN (%s,%s) AND category_id IN ("+ ",".join(["%s"]*len(category_ids))+ ") AND (`created_at` < %s OR (`created_at` < %s AND `id` < %s)) ORDER BY `created_at` DESC, `id` DESC LIMIT %s"
@@ -500,7 +613,6 @@ def get_transactions():
                     sql = "SELECT * FROM `transaction_evidences` WHERE `item_id` = %s"
                     c2.execute(sql, [item['id']])
                     transaction_evidence = c2.fetchone()
-
 
                     if transaction_evidence:
                         sql = "SELECT * FROM `shippings` WHERE `transaction_evidence_id` = %s"
@@ -639,7 +751,6 @@ def get_item(item_id=None):
                 # if not transaction_evidence:
                 #     http_json_error(requests.codes['not_found'], "transaction_evidence not found")
 
-
                 sql = "SELECT * FROM `shippings` WHERE `transaction_evidence_id` = %s"
                 c.execute(sql, (transaction_evidence["id"],))
                 shipping = c.fetchone()
@@ -777,7 +888,7 @@ def post_buy():
                                         to_address=buyer['address'],
                                         to_name=buyer['account_name'],
                                         from_address=seller['address'],
-                                            from_name=seller['account_name'],
+                                        from_name=seller['account_name'],
                                     ))
                 res.raise_for_status()
             except (socket.gaierror, requests.HTTPError) as err:
@@ -1116,7 +1227,6 @@ def post_complete():
                 transaction_evidence["id"],
             ))
 
-
             sql = "UPDATE `transaction_evidences` SET `status` = %s, `updated_at` = %s WHERE `id` = %s"
             c.execute(sql, (
                 Constants.TRANSACTION_EVIDENCE_STATUS_DONE,
@@ -1166,7 +1276,8 @@ def get_qrcode(transaction_evidence_id):
             if shipping is None:
                 http_json_error(requests.codes['not_found'], "shippings not found")
 
-            if shipping["status"] != Constants.SHIPPING_STATUS_WAIT_PICKUP and shipping["status"] != Constants.SHIPPING_STATUS_SHIPPING:
+            if shipping["status"] != Constants.SHIPPING_STATUS_WAIT_PICKUP \
+                    and shipping["status"] != Constants.SHIPPING_STATUS_SHIPPING:
                 http_json_error(requests.codes['forbidden'], "qrcode not available")
 
             if len(shipping["img_binary"]) == 0:
@@ -1180,7 +1291,7 @@ def get_qrcode(transaction_evidence_id):
     res = flask.make_response(img_binary)
     res.headers.set('Content-Type', 'image/png')
 
-    return  res
+    return res
 
 
 @app.route("/bump", methods=["POST"])
@@ -1246,6 +1357,7 @@ def get_settings():
 
     try:
         conn = dbh()
+        # todo: Change to use Redis if needed
         sql = "SELECT * FROM `categories`"
         with conn.cursor() as c:
             c.execute(sql)
