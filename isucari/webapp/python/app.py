@@ -153,7 +153,21 @@ def get_user_simple_by_id(user_id):
 
 def get_category_by_id(category_id):
     r = get_redis_client()
-    return r.hgetall(create_category_key(category_id))
+    category = r.hgetall(create_category_key(category_id))
+    if category:
+        return category
+
+    conn = dbh()
+    sql = "SELECT * FROM `categories` WHERE `id` = %s"
+    with conn.cursor() as c:
+        c.execute(sql, (category_id,))
+        category = c.fetchone()
+        # TODO: check err
+    if category['parent_id'] != 0:
+        parent = get_category_by_id(category['parent_id'])
+        if parent is not None:
+            category['parent_category_name'] = parent['category_name']
+    return category
 
 
 def to_user_json(user):
@@ -443,6 +457,19 @@ def get_new_category_items(root_category_id=None):
     with conn.cursor() as c:
         try:
             category_ids = r.lrange(create_category_parent_key(root_category_id), 0, -1)
+
+            if not category_ids:
+                category_ids = []
+                sql = "SELECT id FROM `categories` WHERE parent_id=%s"
+                c.execute(sql, (
+                    root_category_id,
+                ))
+
+                while True:
+                    category = c.fetchone()
+                    if category is None:
+                        break
+                    category_ids.append(category["id"])
 
             if item_id > 0 and created_at > 0:
                 sql = "SELECT * FROM `items` WHERE `status` IN (%s,%s) AND category_id IN ("+ ",".join(["%s"]*len(category_ids))+ ") AND (`created_at` < %s OR (`created_at` < %s AND `id` < %s)) ORDER BY `created_at` DESC, `id` DESC LIMIT %s"
