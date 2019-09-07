@@ -12,6 +12,7 @@ import MySQLdb.cursors
 import flask
 import bcrypt
 import pathlib
+import redis
 import requests
 
 base_path = pathlib.Path(__file__).resolve().parent.parent
@@ -47,6 +48,8 @@ class Constants(object):
 
     ITEMS_PER_PAGE = 48
     TRANSACTIONS_PER_PAGE = 10
+
+    REDIS_CATEGORY_KEY = 'c_'
 
 
 class HttpException(Exception):
@@ -149,17 +152,8 @@ def get_user_simple_by_id(user_id):
 
 
 def get_category_by_id(category_id):
-    conn = dbh()
-    sql = "SELECT * FROM `categories` WHERE `id` = %s"
-    with conn.cursor() as c:
-        c.execute(sql, (category_id,))
-        category = c.fetchone()
-        # TODO: check err
-    if category['parent_id'] != 0:
-        parent = get_category_by_id(category['parent_id'])
-        if parent is not None:
-            category['parent_category_name'] = parent['category_name']
-    return category
+    r = get_redis_client()
+    return r.hgetall(create_category_key(category_id))
 
 
 def to_user_json(user):
@@ -180,7 +174,7 @@ def to_item_json(item, simple=False):
     if simple:
         keys = ("id", "seller_id", "seller", "status", "name", "price", "image_url", "category_id", "category", "created_at")
 
-    return {k:v for k,v in item.items() if k in keys}
+    return {k: v for k, v in item.items() if k in keys}
 
 
 def ensure_required_payload(keys=None):
@@ -216,7 +210,6 @@ def get_shipment_service_url():
 
 
 def api_shipment_status(shipment_url, params={}):
-
     try:
         res = requests.post(
             shipment_url + "/status",
@@ -234,10 +227,68 @@ def api_shipment_status(shipment_url, params={}):
 def get_image_url(image_name):
     return "/upload/{}".format(image_name)
 
+
+redis_pool = None
+
+
+def create_redis_connection_pool():
+    global redis_pool
+    host = os.getenv('REDIS_HOST', '127.0.0.1')
+    port = os.getenv('REDIS_PORT', 6379)
+    db = os.getenv('REDIS_DB', 0)
+    redis_pool = redis.ConnectionPool(host=host, port=port, db=db, decode_responses=True)
+
+
+def get_redis_client():
+    return redis.Redis(connection_pool=redis_pool)
+
+
+def flush_redis():
+    r = get_redis_client()
+    r.flushdb()
+
+
+def create_category_key(category_id):
+    # Like 'c_11'
+    return Constants.REDIS_CATEGORY_KEY + str(category_id)
+
+
+def create_category_cache():
+    r = get_redis_client()
+    m = dbh()
+
+    with m.cursor() as c:
+        sql = "SELECT * FROM `categories`"
+        c.execute(sql)
+        categories = c.fetchall()
+
+    parent_category_name = {}
+    for c in categories:
+        if c['parent_id'] == 0:
+            parent_category_name[c['id']] = c['category_name']
+
+    for c in categories:
+        parent_name = ''
+        if c['parent_id'] != 0:
+            parent_name = parent_category_name[c['parent_id']]
+
+        data = {
+            'id': c['id'],
+            'category_name': c['category_name'],
+            'parent_id': c['parent_id'],
+            'parent_category_name': parent_name,
+        }
+        r.hmset(create_category_key(c['id']), data)
+
+
 # API
 @app.route("/initialize", methods=["POST"])
 def post_initialize():
     conn = dbh()
+    create_redis_connection_pool()
+
+    flush_redis()
+    create_category_cache()
 
     subprocess.call(["../sql/init.sh"])
 
@@ -265,7 +316,7 @@ def post_initialize():
 
     return flask.jsonify({
         "campaign": 0,  # キャンペーン実施時には還元率の設定を返す。詳しくはマニュアルを参照のこと。
-        "language": "python" # 実装言語を返す
+        "language": "python"  # 実装言語を返す
     })
 
 
@@ -501,7 +552,6 @@ def get_transactions():
                     c2.execute(sql, [item['id']])
                     transaction_evidence = c2.fetchone()
 
-
                     if transaction_evidence:
                         sql = "SELECT * FROM `shippings` WHERE `transaction_evidence_id` = %s"
                         c2.execute(sql, [transaction_evidence["id"]])
@@ -638,7 +688,6 @@ def get_item(item_id=None):
                 transaction_evidence = c.fetchone()
                 # if not transaction_evidence:
                 #     http_json_error(requests.codes['not_found'], "transaction_evidence not found")
-
 
                 sql = "SELECT * FROM `shippings` WHERE `transaction_evidence_id` = %s"
                 c.execute(sql, (transaction_evidence["id"],))
@@ -777,7 +826,7 @@ def post_buy():
                                         to_address=buyer['address'],
                                         to_name=buyer['account_name'],
                                         from_address=seller['address'],
-                                            from_name=seller['account_name'],
+                                        from_name=seller['account_name'],
                                     ))
                 res.raise_for_status()
             except (socket.gaierror, requests.HTTPError) as err:
@@ -1116,7 +1165,6 @@ def post_complete():
                 transaction_evidence["id"],
             ))
 
-
             sql = "UPDATE `transaction_evidences` SET `status` = %s, `updated_at` = %s WHERE `id` = %s"
             c.execute(sql, (
                 Constants.TRANSACTION_EVIDENCE_STATUS_DONE,
@@ -1166,7 +1214,8 @@ def get_qrcode(transaction_evidence_id):
             if shipping is None:
                 http_json_error(requests.codes['not_found'], "shippings not found")
 
-            if shipping["status"] != Constants.SHIPPING_STATUS_WAIT_PICKUP and shipping["status"] != Constants.SHIPPING_STATUS_SHIPPING:
+            if shipping["status"] != Constants.SHIPPING_STATUS_WAIT_PICKUP \
+                    and shipping["status"] != Constants.SHIPPING_STATUS_SHIPPING:
                 http_json_error(requests.codes['forbidden'], "qrcode not available")
 
             if len(shipping["img_binary"]) == 0:
@@ -1180,7 +1229,7 @@ def get_qrcode(transaction_evidence_id):
     res = flask.make_response(img_binary)
     res.headers.set('Content-Type', 'image/png')
 
-    return  res
+    return res
 
 
 @app.route("/bump", methods=["POST"])
@@ -1246,6 +1295,7 @@ def get_settings():
 
     try:
         conn = dbh()
+        # todo: Change to use Redis if needed
         sql = "SELECT * FROM `categories`"
         with conn.cursor() as c:
             c.execute(sql)
