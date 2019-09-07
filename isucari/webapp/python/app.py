@@ -676,11 +676,11 @@ def get_transactions():
                 if item is None:
                     break
 
-                seller = get_user_simple_by_id(item["seller_id"])
-                category = get_category_by_id(item["category_id"])
-
-                item["category"] = category
-                item["seller"] = to_user_json(seller)
+                # seller = get_user_simple_by_id(item["seller_id"])
+                # category = get_category_by_id(item["category_id"])
+                #
+                # item["category"] = category
+                # item["seller"] = to_user_json(seller)
                 item["image_url"] = get_image_url(item["image_name"])
                 item = to_item_json(item, simple=False)
 
@@ -705,6 +705,18 @@ def get_transactions():
         except MySQLdb.Error as err:
             app.logger.exception(err)
             http_json_error(requests.codes['internal_server_error'], "db error")
+
+    category_ids = {}
+    seller_ids = {}
+    for i in item_details:
+        category_ids[i['category_id']] = True
+        seller_ids[i['seller_id']] = True
+    categories = mget_category_by_ids(category_ids)
+    sellers = mget_user_simple_by_ids(seller_ids)
+
+    for i in item_details:
+        i['category'] = categories[i['category_id']]
+        i['seller'] = to_user_json(sellers[i['seller_id']])
 
     has_next = False
     if len(item_details) > Constants.TRANSACTIONS_PER_PAGE:
