@@ -457,10 +457,10 @@ def get_items(c, item_id, created_at, query1, query2, detail: bool = False):
                         if not shipping:
                             http_json_error(requests.codes['not_found'], "shipping not found")
 
-                        ssr = api_shipment_status(get_shipment_service_url(), {"reserve_id": shipping["reserve_id"]})
+                        # ssr = api_shipment_status(get_shipment_service_url(), {"reserve_id": shipping["reserve_id"]})
                         item["transaction_evidence_id"] = transaction_evidence["id"]
                         item["transaction_evidence_status"] = transaction_evidence["status"]
-                        item["shipping_status"] = ssr["status"]
+                        item["shipping_status"] = shipping["status"]
 
         has_next = False
         if len(item_simples) > Constants.ITEMS_PER_PAGE:
@@ -582,8 +582,8 @@ def get_new_category_items(root_category_id=None):
 
 @app.route("/users/transactions.json", methods=["GET"])
 def get_transactions():
-    conn = dbh()
     user = get_user()
+    conn = dbh()
 
     item_id = 0
     created_at = 0
@@ -603,15 +603,10 @@ def get_transactions():
     with conn.cursor() as c:
         query1 = build_query(
             c,
-            "SELECT * FROM `items` WHERE AND (`seller_id` = %s OR `buyer_id` = %s) AND  `status` IN (%s,%s,%s,%s,%s) AND (`created_at` < %s OR (`created_at` <= %s AND `id` < %s)) ORDER BY `created_at` DESC, `id` DESC LIMIT %s",
+            "SELECT * FROM `items` WHERE (`seller_id` = %s OR `buyer_id` = %s) AND (`created_at` < %s OR (`created_at` <= %s AND `id` < %s)) ORDER BY `created_at` DESC, `id` DESC LIMIT %s",
             (
                 user['id'],
                 user['id'],
-                Constants.ITEM_STATUS_ON_SALE,
-                Constants.ITEM_STATUS_TRADING,
-                Constants.ITEM_STATUS_SOLD_OUT,
-                Constants.ITEM_STATUS_CANCEL,
-                Constants.ITEM_STATUS_STOP,
                 datetime.datetime.fromtimestamp(created_at),
                 datetime.datetime.fromtimestamp(created_at),
                 item_id,
@@ -620,15 +615,10 @@ def get_transactions():
         )
         query2 = build_query(
             c,
-            "SELECT * FROM `items` WHERE (`seller_id` = %s OR `buyer_id` = %s ) AND `status` IN (%s,%s,%s,%s,%s)  ORDER BY `created_at` DESC, `id` DESC LIMIT %s",
+            "SELECT * FROM `items` WHERE (`seller_id` = %s OR `buyer_id` = %s ) ORDER BY `created_at` DESC, `id` DESC LIMIT %s",
             (
                 user['id'],
                 user['id'],
-                Constants.ITEM_STATUS_ON_SALE,
-                Constants.ITEM_STATUS_TRADING,
-                Constants.ITEM_STATUS_SOLD_OUT,
-                Constants.ITEM_STATUS_CANCEL,
-                Constants.ITEM_STATUS_STOP,
                 Constants.TRANSACTIONS_PER_PAGE + 1,
             )
         )
@@ -734,10 +724,10 @@ def get_item(item_id=None):
                 if not shipping:
                     http_json_error(requests.codes['not_found'], "shipping not found")
 
-                ssr = api_shipment_status(get_shipment_service_url(), {"reserve_id": shipping["reserve_id"]})
+                # ssr = api_shipment_status(get_shipment_service_url(), {"reserve_id": shipping["reserve_id"]})
                 item["transaction_evidence_id"] = transaction_evidence["id"]
                 item["transaction_evidence_status"] = transaction_evidence["status"]
-                item["shipping_status"] = ssr["status"]
+                item["shipping_status"] = shipping["status"]
             else:
                 item["buyer"] = {}
                 item["buyer_id"] = 0
