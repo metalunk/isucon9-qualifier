@@ -235,7 +235,7 @@ def mget_category_by_ids(category_ids: dict) -> dict:
     res = pipe.execute()
     val = {}
     for r in res:
-        val[int(r['id'])] = r
+        val[int(r['id'])] = convert_to_int(r)
     return val
 
 
