@@ -153,6 +153,26 @@ def get_user_simple_by_id(user_id):
     return user
 
 
+def mget_user_simple_by_ids(user_ids: dict) -> dict:
+    user_map = {}
+    try:
+        conn = dbh()
+        with conn.cursor() as c:
+            ids = list(user_ids.keys())
+            format_strings = ','.join(['%s'] * len(ids))
+            c.execute("SELECT * FROM `users` WHERE id IN (%s)" % format_strings, tuple(ids))
+            users = c.fetchall()
+        for u in users:
+            id = u['id']
+            if id not in user_ids:
+                http_json_error(requests.codes['not_found'], "user not found")
+            user_map[id] = u
+    except MySQLdb.Error as err:
+        app.logger.exception(err)
+        http_json_error(requests.codes['internal_server_error'], "db error")
+    return user_map
+
+
 def convert_to_int(category):
     category['id'] = int(category['id'])
     category['parent_id'] = int(category['parent_id'])
@@ -207,7 +227,7 @@ def get_category_by_id(category_id):
     return category
 
 
-def mget_category_by_ids(category_ids):
+def mget_category_by_ids(category_ids: dict) -> dict:
     r = get_redis_client()
     pipe = r.pipeline()
     for category_id in category_ids.keys():
@@ -220,7 +240,11 @@ def mget_category_by_ids(category_ids):
 
 
 def to_user_json(user):
-    del (user['hashed_password'], user['last_bump'], user['created_at'])
+    try:
+        # todo: Don't know why this is needed
+        del (user['hashed_password'], user['last_bump'], user['created_at'])
+    except Exception:
+        pass
     return user
 
 
@@ -446,11 +470,10 @@ def get_items(c, item_id, created_at, query1, query2, detail: bool = False):
             if item is None:
                 break
 
-            seller = get_user_simple_by_id(item["seller_id"])
+            # seller = get_user_simple_by_id(item["seller_id"])
             # category = get_category_by_id(item["category_id"])  # todo: N+1
-
             # item["category"] = category
-            item["seller"] = to_user_json(seller)
+            # item["seller"] = to_user_json(seller)
             item["image_url"] = get_image_url(item["image_name"])
             item = to_item_json(item, simple=not detail)
 
@@ -475,12 +498,16 @@ def get_items(c, item_id, created_at, query1, query2, detail: bool = False):
                         item["shipping_status"] = shipping["status"]
 
         category_ids = {}
+        seller_ids = {}
         for i in item_simples:
             category_ids[i['category_id']] = True
+            seller_ids[i['seller_id']] = True
         categories = mget_category_by_ids(category_ids)
+        sellers = mget_user_simple_by_ids(seller_ids)
 
         for i in item_simples:
             i['category'] = categories[i['category_id']]
+            i['seller'] = to_user_json(sellers[i['seller_id']])
 
         has_next = False
         if len(item_simples) > Constants.ITEMS_PER_PAGE:
