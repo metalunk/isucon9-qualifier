@@ -603,10 +603,15 @@ def get_transactions():
     with conn.cursor() as c:
         query1 = build_query(
             c,
-            "SELECT * FROM `items` WHERE (`seller_id` = %s OR `buyer_id` = %s) AND (`created_at` < %s OR (`created_at` <= %s AND `id` < %s)) ORDER BY `created_at` DESC, `id` DESC LIMIT %s",
+            "SELECT * FROM `items` WHERE AND (`seller_id` = %s OR `buyer_id` = %s) AND  `status` IN (%s,%s,%s,%s,%s) AND (`created_at` < %s OR (`created_at` <= %s AND `id` < %s)) ORDER BY `created_at` DESC, `id` DESC LIMIT %s",
             (
                 user['id'],
                 user['id'],
+                Constants.ITEM_STATUS_ON_SALE,
+                Constants.ITEM_STATUS_TRADING,
+                Constants.ITEM_STATUS_SOLD_OUT,
+                Constants.ITEM_STATUS_CANCEL,
+                Constants.ITEM_STATUS_STOP,
                 datetime.datetime.fromtimestamp(created_at),
                 datetime.datetime.fromtimestamp(created_at),
                 item_id,
@@ -615,10 +620,15 @@ def get_transactions():
         )
         query2 = build_query(
             c,
-            "SELECT * FROM `items` WHERE (`seller_id` = %s OR `buyer_id` = %s ) ORDER BY `created_at` DESC, `id` DESC LIMIT %s",
+            "SELECT * FROM `items` WHERE (`seller_id` = %s OR `buyer_id` = %s ) AND `status` IN (%s,%s,%s,%s,%s)  ORDER BY `created_at` DESC, `id` DESC LIMIT %s",
             (
                 user['id'],
                 user['id'],
+                Constants.ITEM_STATUS_ON_SALE,
+                Constants.ITEM_STATUS_TRADING,
+                Constants.ITEM_STATUS_SOLD_OUT,
+                Constants.ITEM_STATUS_CANCEL,
+                Constants.ITEM_STATUS_STOP,
                 Constants.TRANSACTIONS_PER_PAGE + 1,
             )
         )
