@@ -207,6 +207,18 @@ def get_category_by_id(category_id):
     return category
 
 
+def mget_category_by_ids(category_ids):
+    r = get_redis_client()
+    pipe = r.pipeline()
+    for category_id in category_ids.keys():
+        pipe.hgetall(create_category_key(category_id))
+    res = pipe.execute()
+    val = {}
+    for r in res:
+        val[int(r['id'])] = r
+    return val
+
+
 def to_user_json(user):
     del (user['hashed_password'], user['last_bump'], user['created_at'])
     return user
@@ -435,9 +447,9 @@ def get_items(c, item_id, created_at, query1, query2, detail: bool = False):
                 break
 
             seller = get_user_simple_by_id(item["seller_id"])
-            category = get_category_by_id(item["category_id"])  # todo: N+1
+            # category = get_category_by_id(item["category_id"])  # todo: N+1
 
-            item["category"] = category
+            # item["category"] = category
             item["seller"] = to_user_json(seller)
             item["image_url"] = get_image_url(item["image_name"])
             item = to_item_json(item, simple=not detail)
@@ -461,6 +473,14 @@ def get_items(c, item_id, created_at, query1, query2, detail: bool = False):
                         item["transaction_evidence_id"] = transaction_evidence["id"]
                         item["transaction_evidence_status"] = transaction_evidence["status"]
                         item["shipping_status"] = shipping["status"]
+
+        category_ids = {}
+        for i in item_simples:
+            category_ids[i['category_id']] = True
+        categories = mget_category_by_ids(category_ids)
+
+        for i in item_simples:
+            i['category'] = categories[i['category_id']]
 
         has_next = False
         if len(item_simples) > Constants.ITEMS_PER_PAGE:
@@ -582,8 +602,8 @@ def get_new_category_items(root_category_id=None):
 
 @app.route("/users/transactions.json", methods=["GET"])
 def get_transactions():
-    conn = dbh()
     user = get_user()
+    conn = dbh()
 
     item_id = 0
     created_at = 0
