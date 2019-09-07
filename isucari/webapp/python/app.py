@@ -440,7 +440,7 @@ def get_items(c, item_id, created_at, query1, query2, detail: bool = False):
             item["category"] = category
             item["seller"] = to_user_json(seller)
             item["image_url"] = get_image_url(item["image_name"])
-            item = to_item_json(item, simple=True)
+            item = to_item_json(item, simple=not detail)
 
             item_simples.append(item)
 
