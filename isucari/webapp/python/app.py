@@ -151,9 +151,32 @@ def get_user_simple_by_id(user_id):
     return user
 
 
-def get_category_by_id(category_id):
+def convert_to_int(category):
+    category['id'] = int(category['id'])
+    category['parent_id'] = int(category['parent_id'])
+    return category
+
+
+def get_category_cache(category_id):
     r = get_redis_client()
     category = r.hgetall(create_category_key(category_id))
+    if category:
+        return convert_to_int(category)
+    else:
+        return None
+
+
+def get_category_parent_cache(root_category_id):
+    r = get_redis_client()
+    category_ids = r.lrange(create_category_parent_key(root_category_id), 0, -1)
+    if category_ids:
+        return list(map(int, category_ids))
+    else:
+        return None
+
+
+def get_category_by_id(category_id):
+    category = get_category_cache(category_id)
     if category:
         return category
 
@@ -456,7 +479,7 @@ def get_new_category_items(root_category_id=None):
 
     with conn.cursor() as c:
         try:
-            category_ids = r.lrange(create_category_parent_key(root_category_id), 0, -1)
+            category_ids = get_category_parent_cache(root_category_id)
 
             if not category_ids:
                 category_ids = []
