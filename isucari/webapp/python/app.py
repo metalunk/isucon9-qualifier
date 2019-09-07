@@ -240,11 +240,20 @@ def mget_category_by_ids(category_ids: dict) -> dict:
 
 
 def to_user_json(user):
+    # todo: Don't know why this is needed
     try:
-        # todo: Don't know why this is needed
-        del (user['hashed_password'], user['last_bump'], user['created_at'])
+        del (user['hashed_password'])
     except Exception:
         pass
+    try:
+        del (user['last_bump'])
+    except Exception:
+        pass
+    try:
+        del (user['created_at'])
+    except Exception:
+        pass
+
     return user
 
 
