@@ -34,6 +34,8 @@ CREATE TABLE `items` (
 ) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4;
 
 ALTER TABLE items ADD INDEX idx_status(status);
+ALTER TABLE items ADD INDEX idx_sell(seller_id);
+ALTER TABLE items ADD INDEX idx_buy(buyer_id);
 
 DROP TABLE IF EXISTS `transaction_evidences`;
 CREATE TABLE `transaction_evidences` (
