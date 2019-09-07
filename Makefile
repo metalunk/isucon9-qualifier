@@ -1,7 +1,7 @@
 .PHONY: all
 all: run-dd
 
-DEPLOY_BRANCH = make
+DEPLOY_BRANCH = master
 
 .PHONY: deploy
 deploy:
