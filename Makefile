@@ -1,7 +1,7 @@
 .PHONY: all
 all: run-dd
 
-DEPLOY_BRANCH = master
+DEPLOY_BRANCH = feature/n-one2
 
 .PHONY: deploy
 deploy:

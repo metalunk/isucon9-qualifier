@@ -418,7 +418,7 @@ def build_query(cursor, query, args=None):
 
 
 def get_items(c, item_id, created_at, query1, query2, detail: bool = False):
-    conn = dbh()
+    #conn = dbh()
     try:
         if item_id > 0 and created_at > 0:
             # paging
