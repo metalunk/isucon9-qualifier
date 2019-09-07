@@ -621,7 +621,12 @@ def get_transactions():
                         if not shipping:
                             http_json_error(requests.codes['not_found'], "shipping not found")
 
-                        ssr = api_shipment_status(get_shipment_service_url(), {"reserve_id": shipping["reserve_id"]})
+                        if shipping["status"] == "initial":
+                            ssr = {"status": 'wait_shipping'}
+                        elif shipping["status"] == "done":
+                            ssr = {"status": 'done'}
+                        else:
+                            ssr = api_shipment_status(get_shipment_service_url(), {"reserve_id": shipping["reserve_id"]})
                         item["transaction_evidence_id"] = transaction_evidence["id"]
                         item["transaction_evidence_status"] = transaction_evidence["status"]
                         item["shipping_status"] = ssr["status"]
