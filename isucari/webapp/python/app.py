@@ -418,7 +418,6 @@ def build_query(cursor, query, args=None):
 
 
 def get_items(c, item_id, created_at, query1, query2, detail: bool = False):
-    #conn = dbh()
     try:
         if item_id > 0 and created_at > 0:
             # paging
@@ -445,6 +444,7 @@ def get_items(c, item_id, created_at, query1, query2, detail: bool = False):
             item_simples.append(item)
 
             if detail:
+                conn = dbh()
                 with conn.cursor() as c2:
                     sql = "SELECT * FROM `transaction_evidences` WHERE `item_id` = %s"
                     c2.execute(sql, [item['id']])
