@@ -457,10 +457,10 @@ def get_items(c, item_id, created_at, query1, query2, detail: bool = False):
                         if not shipping:
                             http_json_error(requests.codes['not_found'], "shipping not found")
 
-                        ssr = api_shipment_status(get_shipment_service_url(), {"reserve_id": shipping["reserve_id"]})
+                        # ssr = api_shipment_status(get_shipment_service_url(), {"reserve_id": shipping["reserve_id"]})
                         item["transaction_evidence_id"] = transaction_evidence["id"]
                         item["transaction_evidence_status"] = transaction_evidence["status"]
-                        item["shipping_status"] = ssr["status"]
+                        item["shipping_status"] = shipping["status"]
 
         has_next = False
         if len(item_simples) > Constants.ITEMS_PER_PAGE:
@@ -724,10 +724,10 @@ def get_item(item_id=None):
                 if not shipping:
                     http_json_error(requests.codes['not_found'], "shipping not found")
 
-                ssr = api_shipment_status(get_shipment_service_url(), {"reserve_id": shipping["reserve_id"]})
+                # ssr = api_shipment_status(get_shipment_service_url(), {"reserve_id": shipping["reserve_id"]})
                 item["transaction_evidence_id"] = transaction_evidence["id"]
                 item["transaction_evidence_status"] = transaction_evidence["status"]
-                item["shipping_status"] = ssr["status"]
+                item["shipping_status"] = shipping["status"]
             else:
                 item["buyer"] = {}
                 item["buyer_id"] = 0
