@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import socket
-import io
 import os
 import random
 import string
@@ -50,6 +49,7 @@ class Constants(object):
     TRANSACTIONS_PER_PAGE = 10
 
     REDIS_CATEGORY_KEY = 'c_'
+    REDIS_CATEGORY_PARENT_KEY = 'cp_'
 
 
 class HttpException(Exception):
@@ -240,7 +240,7 @@ def create_redis_connection_pool():
 
 
 def get_redis_client():
-    return redis.Redis(connection_pool=redis_pool)
+    return redis.Redis(connection_pool=redis_pool, encoding='utf-8', decode_responses=True)
 
 
 def flush_redis():
@@ -251,6 +251,11 @@ def flush_redis():
 def create_category_key(category_id):
     # Like 'c_11'
     return Constants.REDIS_CATEGORY_KEY + str(category_id)
+
+
+def create_category_parent_key(category_parent_id):
+    # Like 'cp_1'
+    return Constants.REDIS_CATEGORY_PARENT_KEY + str(category_parent_id)
 
 
 def create_category_cache():
@@ -281,6 +286,21 @@ def create_category_cache():
         r.hmset(create_category_key(c['id']), data)
 
 
+def create_category_parent_cache():
+    r = get_redis_client()
+    m = dbh()
+
+    with m.cursor() as c:
+        sql = "SELECT * FROM `categories`"
+        c.execute(sql)
+        categories = c.fetchall()
+
+    for c in categories:
+        parent_id = c['parent_id']
+        if parent_id != 0:
+            r.lpush(create_category_parent_key(c['parent_id']), c['id'])
+
+
 # API
 @app.route("/initialize", methods=["POST"])
 def post_initialize():
@@ -289,6 +309,7 @@ def post_initialize():
 
     flush_redis()
     create_category_cache()
+    create_category_parent_cache()
 
     subprocess.call(["../sql/init.sh"])
 
@@ -400,6 +421,7 @@ def get_new_items():
 @app.route("/new_items/<root_category_id>.json", methods=["GET"])
 def get_new_category_items(root_category_id=None):
     conn = dbh()
+    r = get_redis_client()
 
     root_category = get_category_by_id(root_category_id)
 
@@ -418,19 +440,9 @@ def get_new_category_items(root_category_id=None):
             http_json_error(requests.codes['bad_request'], "created_at param error")
         created_at = int(created_at_str)
 
-    category_ids = []
     with conn.cursor() as c:
         try:
-            sql = "SELECT id FROM `categories` WHERE parent_id=%s"
-            c.execute(sql, (
-                root_category_id,
-            ))
-
-            while True:
-                category = c.fetchone()
-                if category is None:
-                    break
-                category_ids.append(category["id"])
+            category_ids = r.lrange(create_category_parent_key(root_category_id), 0, -1)
 
             if item_id > 0 and created_at > 0:
                 sql = "SELECT * FROM `items` WHERE `status` IN (%s,%s) AND category_id IN ("+ ",".join(["%s"]*len(category_ids))+ ") AND (`created_at` < %s OR (`created_at` < %s AND `id` < %s)) ORDER BY `created_at` DESC, `id` DESC LIMIT %s"
