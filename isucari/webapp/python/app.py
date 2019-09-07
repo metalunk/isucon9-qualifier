@@ -284,7 +284,7 @@ def create_category_cache():
     parent_category_name = {}
     for c in categories:
         if c['parent_id'] == 0:
-            parent_category_name[c['id']] = c['category_name']
+            parent_category_name[c['parent_id']] = c['category_name']
 
     for c in categories:
         parent_name = ''
