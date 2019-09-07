@@ -270,7 +270,7 @@ redis_pool = None
 
 def create_redis_connection_pool():
     global redis_pool
-    host = os.getenv('REDIS_HOST', '127.0.0.1')
+    host = os.getenv('REDIS_HOST', 'isucon002')
     port = os.getenv('REDIS_PORT', 6379)
     db = os.getenv('REDIS_DB', 0)
     redis_pool = redis.ConnectionPool(host=host, port=port, db=db, decode_responses=True)
