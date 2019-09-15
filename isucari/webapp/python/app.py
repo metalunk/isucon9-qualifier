@@ -173,8 +173,8 @@ def mget_user_simple_by_ids(user_ids: dict) -> dict:
 
 def get_category_parent_with_cache(root_category_id):
     root_category_id = int(root_category_id)
-    category_ids = category_parent_cache[root_category_id]
-    if category_ids:
+    if root_category_id in category_parent_cache:
+        category_ids = category_parent_cache[root_category_id]
         return list(map(int, category_ids))
     else:
         conn = dbh()
@@ -194,9 +194,10 @@ def get_category_parent_with_cache(root_category_id):
 
 def get_category_by_id(category_id):
     category_id = int(category_id)
-    category = category_cache[category_id]
-    if category:
-        return category
+    if category_id in category_cache:
+        category = category_cache[category_id]
+        if category:
+            return category
 
     conn = dbh()
     sql = "SELECT * FROM `categories` WHERE `id` = %s"
@@ -214,6 +215,8 @@ def get_category_by_id(category_id):
 def mget_category_by_ids(category_ids: dict) -> dict:
     res = {}
     for _id in category_ids:
+        if _id not in category_cache:
+            raise NotImplementedError('Please hit post /initialize before using the app.')
         c = category_cache[_id]
         res[_id] = c
     return res
