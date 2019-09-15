@@ -16,4 +16,3 @@ requests
 six
 urllib3
 Werkzeug
-redis

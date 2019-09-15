@@ -11,7 +11,6 @@ import MySQLdb.cursors
 import flask
 import bcrypt
 import pathlib
-import redis
 import requests
 from MySQLdb._exceptions import ProgrammingError
 from MySQLdb.compat import unicode
@@ -49,9 +48,6 @@ class Constants(object):
 
     ITEMS_PER_PAGE = 48
     TRANSACTIONS_PER_PAGE = 10
-
-    REDIS_CATEGORY_KEY = 'c_'
-    REDIS_CATEGORY_PARENT_KEY = 'cp_'
 
 
 class HttpException(Exception):
@@ -175,24 +171,9 @@ def mget_user_simple_by_ids(user_ids: dict) -> dict:
     return user_map
 
 
-def convert_to_int(category):
-    category['id'] = int(category['id'])
-    category['parent_id'] = int(category['parent_id'])
-    return category
-
-
-def get_category_cache(category_id):
-    r = get_redis_client()
-    category = r.hgetall(create_category_key(category_id))
-    if category:
-        return convert_to_int(category)
-    else:
-        return None
-
-
 def get_category_parent_with_cache(root_category_id):
-    r = get_redis_client()
-    category_ids = r.lrange(create_category_parent_key(root_category_id), 0, -1)
+    root_category_id = int(root_category_id)
+    category_ids = category_parent_cache[root_category_id]
     if category_ids:
         return list(map(int, category_ids))
     else:
@@ -212,7 +193,8 @@ def get_category_parent_with_cache(root_category_id):
 
 
 def get_category_by_id(category_id):
-    category = get_category_cache(category_id)
+    category_id = int(category_id)
+    category = category_cache[category_id]
     if category:
         return category
 
@@ -230,15 +212,11 @@ def get_category_by_id(category_id):
 
 
 def mget_category_by_ids(category_ids: dict) -> dict:
-    r = get_redis_client()
-    pipe = r.pipeline()
-    for category_id in category_ids.keys():
-        pipe.hgetall(create_category_key(category_id))
-    res = pipe.execute()
-    val = {}
-    for r in res:
-        val[int(r['id'])] = convert_to_int(r)
-    return val
+    res = {}
+    for _id in category_ids:
+        c = category_cache[_id]
+        res[_id] = c
+    return res
 
 
 def to_user_json(user):
@@ -326,40 +304,10 @@ def get_image_url(image_name):
     return "/upload/{}".format(image_name)
 
 
-redis_pool = None
-
-
-def create_redis_connection_pool():
-    global redis_pool
-    host = os.getenv('REDIS_HOST', 'isucon002')
-    port = os.getenv('REDIS_PORT', 6379)
-    db = os.getenv('REDIS_DB', 0)
-    redis_pool = redis.ConnectionPool(host=host, port=port, db=db, decode_responses=True)
-
-
-def get_redis_client():
-    if redis_pool is None:
-        create_redis_connection_pool()
-    return redis.Redis(connection_pool=redis_pool, encoding='utf-8', decode_responses=True)
-
-
-def flush_redis():
-    r = get_redis_client()
-    r.flushdb()
-
-
-def create_category_key(category_id):
-    # Like 'c_11'
-    return Constants.REDIS_CATEGORY_KEY + str(category_id)
-
-
-def create_category_parent_key(category_parent_id):
-    # Like 'cp_1'
-    return Constants.REDIS_CATEGORY_PARENT_KEY + str(category_parent_id)
+category_cache = {}
 
 
 def create_category_cache():
-    r = get_redis_client()
     m = dbh()
 
     with m.cursor() as c:
@@ -373,21 +321,23 @@ def create_category_cache():
             parent_category_name[c['id']] = c['category_name']
 
     for c in categories:
+        _id = c['id']
         parent_name = ''
         if c['parent_id'] != 0:
             parent_name = parent_category_name[c['parent_id']]
 
-        data = {
-            'id': c['id'],
+        category_cache[_id] = {
+            'id': _id,
             'category_name': c['category_name'],
             'parent_id': c['parent_id'],
             'parent_category_name': parent_name,
         }
-        r.hmset(create_category_key(c['id']), data)
+
+
+category_parent_cache = {}
 
 
 def create_category_parent_cache():
-    r = get_redis_client()
     m = dbh()
 
     with m.cursor() as c:
@@ -396,9 +346,13 @@ def create_category_parent_cache():
         categories = c.fetchall()
 
     for c in categories:
+        _id = c['id']
         parent_id = c['parent_id']
         if parent_id != 0:
-            r.lpush(create_category_parent_key(c['parent_id']), c['id'])
+            if parent_id in category_parent_cache:
+                category_parent_cache[parent_id].append(_id)
+            else:
+                category_parent_cache[parent_id] = [_id]
 
 
 # API
@@ -406,7 +360,6 @@ def create_category_parent_cache():
 def post_initialize():
     conn = dbh()
 
-    flush_redis()
     create_category_cache()
     create_category_parent_cache()
 
@@ -1435,7 +1388,6 @@ def get_settings():
 
     try:
         conn = dbh()
-        # todo: Change to use Redis if needed
         sql = "SELECT * FROM `categories`"
         with conn.cursor() as c:
             c.execute(sql)
@@ -1541,4 +1493,3 @@ def get_index(*args, **kwargs):
 
 if __name__ == "__main__":
     app.run(port=8000, debug=True, threaded=True)
-    create_redis_connection_pool()
