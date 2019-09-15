@@ -405,7 +405,6 @@ def create_category_parent_cache():
 @app.route("/initialize", methods=["POST"])
 def post_initialize():
     conn = dbh()
-    create_redis_connection_pool()
 
     flush_redis()
     create_category_cache()
@@ -1542,3 +1541,4 @@ def get_index(*args, **kwargs):
 
 if __name__ == "__main__":
     app.run(port=8000, debug=True, threaded=True)
+    create_redis_connection_pool()
